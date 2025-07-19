@@ -27,8 +27,7 @@ import { serverConfig } from '@/config/server.js'
 // import { handleSessionCreate } from '@/handlers/session/create.js'
 // import { handleSessionDestroy } from '@/handlers/session/destroy.js'
 // Import services for tool registration
-import { CalculatorService } from '@/services/calculator.js'
-import { WeatherService } from '@/services/weather.js'
+import { VisaService } from '@/services/visa.js'
 
 // Create the MCP server
 const server = new McpServer({
@@ -37,105 +36,127 @@ const server = new McpServer({
 })
 
 // Register Tools
-logger.info('🔧 Registering tools...')
+logger.info('🔧 Registering visa tools...')
 
-// Calculator tools
+// Visa tools
 server.registerTool(
-  'add',
+  'fetch-visa-appointments',
   {
-    title: 'Addition Calculator',
-    description: 'Add two numbers together',
+    title: 'Fetch Visa Appointments',
+    description: 'Get current visa appointment availability from all centers',
     inputSchema: {
-      a: z.number().describe('First number'),
-      b: z.number().describe('Second number'),
+      country_code: z
+        .string()
+        .optional()
+        .describe('Filter by origin country code (e.g., tur, are, egy)'),
+      mission_code: z
+        .string()
+        .optional()
+        .describe('Filter by destination country code (e.g., nld, fra, ita)'),
+      status: z
+        .enum(['open', 'closed', 'waitlist_open', 'waitlist_closed'])
+        .optional()
+        .describe('Filter by status'),
+      visa_type: z
+        .string()
+        .optional()
+        .describe('Filter by visa type (partial match)'),
     },
   },
-  async ({ a, b }) => {
-    const result = CalculatorService.add(a, b)
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `${a} + ${b} = ${result}`,
-        },
-      ],
-    }
-  }
-)
-
-server.registerTool(
-  'subtract',
-  {
-    title: 'Subtraction Calculator',
-    description: 'Subtract two numbers',
-    inputSchema: {
-      a: z.number().describe('First number'),
-      b: z.number().describe('Second number'),
-    },
-  },
-  async ({ a, b }) => {
-    const result = CalculatorService.subtract(a, b)
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `${a} - ${b} = ${result}`,
-        },
-      ],
-    }
-  }
-)
-
-server.registerTool(
-  'multiply',
-  {
-    title: 'Multiplication Calculator',
-    description: 'Multiply two numbers',
-    inputSchema: {
-      a: z.number().describe('First number'),
-      b: z.number().describe('Second number'),
-    },
-  },
-  async ({ a, b }) => {
-    const result = CalculatorService.multiply(a, b)
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `${a} × ${b} = ${result}`,
-        },
-      ],
-    }
-  }
-)
-
-server.registerTool(
-  'divide',
-  {
-    title: 'Division Calculator',
-    description: 'Divide two numbers',
-    inputSchema: {
-      a: z.number().describe('Dividend'),
-      b: z.number().describe('Divisor'),
-    },
-  },
-  async ({ a, b }) => {
+  async ({ country_code, mission_code, status, visa_type }) => {
     try {
-      const result = CalculatorService.divide(a, b)
+      const data = await VisaService.getVisaListWithCache({
+        country_code,
+        mission_code,
+        status,
+        visa_type,
+      })
+
+      const totalResults = data.visas.length
+      const openCenters = data.visas.filter(v => v.status === 'open').length
+
       return {
         content: [
           {
             type: 'text',
-            text: `${a} ÷ ${b} = ${result}`,
+            text: `Found ${totalResults} visa centers (${openCenters} currently open for appointments)
+
+Summary:
+${
+  data.summary
+    ? `• Total Results: ${data.summary.total_results}
+• Countries: ${data.summary.countries.join(', ')}
+• Missions: ${data.summary.missions.join(', ')}
+• Last Updated: ${new Date(data.summary.last_updated).toLocaleString()}`
+    : ''
+}
+
+Status Breakdown:
+${
+  data.summary
+    ? Object.entries(data.summary.status_breakdown)
+        .map(
+          ([status, count]) =>
+            `• ${status.replace('_', ' ').toUpperCase()}: ${count}`
+        )
+        .join('\n')
+    : ''
+}`,
           },
         ],
       }
     } catch (error) {
+      // Try to get cached data as fallback
+      const cachedData = await VisaService.getCachedVisaList()
+      if (cachedData) {
+        const totalResults = cachedData.visas.length
+        const openCenters = cachedData.visas.filter(
+          v => v.status === 'open'
+        ).length
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `⚠️ API temporarily unavailable. Showing cached data:
+
+Found ${totalResults} visa centers (${openCenters} currently open for appointments)
+
+Summary (Cached):
+${
+  cachedData.summary
+    ? `• Total Results: ${cachedData.summary.total_results}
+• Countries: ${cachedData.summary.countries.join(', ')}
+• Missions: ${cachedData.summary.missions.join(', ')}
+• Last Updated: ${new Date(cachedData.summary.last_updated).toLocaleString()} (cached)`
+    : ''
+}
+
+Status Breakdown:
+${
+  cachedData.summary
+    ? Object.entries(cachedData.summary.status_breakdown)
+        .map(
+          ([status, count]) =>
+            `• ${status.replace('_', ' ').toUpperCase()}: ${count}`
+        )
+        .join('\n')
+    : ''
+}
+
+Note: Data may be outdated. Please try again later for live data.`,
+            },
+          ],
+        }
+      }
+
       return {
         content: [
           {
             type: 'text',
-            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            text: `❌ Error fetching visa appointments: ${error instanceof Error ? error.message : 'Unknown error'}
+
+The visa appointment API is currently unavailable. Please try again later.`,
           },
         ],
         isError: true,
@@ -144,224 +165,416 @@ server.registerTool(
   }
 )
 
-// Weather tools
 server.registerTool(
-  'fetch-weather',
+  'get-open-appointments',
   {
-    title: 'Weather Fetcher',
-    description: 'Get current weather information for a city',
+    title: 'Get Open Appointments',
+    description: 'Get only visa centers with open appointments',
     inputSchema: {
-      city: z.string().describe('Name of the city'),
-    },
-  },
-  async ({ city }) => {
-    const weatherData = await WeatherService.fetchWeatherData(city)
-    return {
-      content: [
-        {
-          type: 'text',
-          text: weatherData,
-        },
-      ],
-    }
-  }
-)
-
-server.registerTool(
-  'get-forecast',
-  {
-    title: 'Weather Forecast',
-    description: 'Get weather forecast for a city',
-    inputSchema: {
-      city: z.string().describe('Name of the city'),
-      days: z
-        .number()
-        .optional()
-        .describe('Number of days for forecast (default: 5)'),
-    },
-  },
-  async ({ city, days }) => {
-    const forecast = await WeatherService.getForecast(city, days || 5)
-    return {
-      content: [
-        {
-          type: 'text',
-          text: forecast.join('\n'),
-        },
-      ],
-    }
-  }
-)
-
-// Register Prompts
-logger.info('💭 Registering prompts...')
-
-// Code review prompt
-server.registerPrompt(
-  'review-code',
-  {
-    title: 'Code Review Assistant',
-    description:
-      'Generate a comprehensive code review with best practices and suggestions',
-    argsSchema: {
-      code: z.string().describe('The code to review'),
-      language: z
+      country_code: z
         .string()
         .optional()
-        .describe('Programming language (auto-detected if not provided)'),
-      focus: z.string().optional().describe('Review focus area'),
+        .describe('Filter by origin country code'),
+      mission_code: z
+        .string()
+        .optional()
+        .describe('Filter by destination country code'),
     },
   },
-  ({ code, language, focus }) => {
-    const focusAreas = {
-      security:
-        'Focus on security vulnerabilities, input validation, and secure coding practices.',
-      performance:
-        'Focus on performance optimizations, algorithmic efficiency, and resource usage.',
-      readability:
-        'Focus on code clarity, naming conventions, and maintainability.',
-      all: 'Provide a comprehensive review covering security, performance, readability, and best practices.',
-    }
+  async ({ country_code, mission_code }) => {
+    try {
+      const data = await VisaService.getVisaListWithCache()
+      const openAppointments = VisaService.getOpenAppointments(data)
 
-    return {
-      messages: [
-        {
-          role: 'user' as const,
-          content: {
-            type: 'text' as const,
-            text: `Please review the following ${language || 'code'} and provide detailed feedback. ${focusAreas[focus as keyof typeof focusAreas]}
+      let filtered = openAppointments
+      if (country_code) {
+        filtered = filtered.filter(
+          v => v.country_code.toLowerCase() === country_code.toLowerCase()
+        )
+      }
+      if (mission_code) {
+        filtered = filtered.filter(
+          v => v.mission_code.toLowerCase() === mission_code.toLowerCase()
+        )
+      }
 
-\`\`\`${language || ''}
-${code}
-\`\`\`
+      if (filtered.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'No open appointments found with the specified criteria.',
+            },
+          ],
+        }
+      }
 
-Please provide:
-1. Overall assessment
-2. Specific issues and suggestions
-3. Best practices recommendations
-4. Security considerations (if applicable)
-5. Performance considerations (if applicable)`,
+      const formattedResults = filtered
+        .map(visa => VisaService.formatVisaCenter(visa))
+        .join('\n\n')
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `🎯 Found ${filtered.length} visa centers with open appointments:\n\n${formattedResults}`,
           },
-        },
-      ],
+        ],
+      }
+    } catch (error) {
+      // Try to get cached data as fallback
+      const cachedData = await VisaService.getCachedVisaList()
+      if (cachedData) {
+        const openAppointments = VisaService.getOpenAppointments(cachedData)
+
+        let filtered = openAppointments
+        if (country_code) {
+          filtered = filtered.filter(
+            v => v.country_code.toLowerCase() === country_code.toLowerCase()
+          )
+        }
+        if (mission_code) {
+          filtered = filtered.filter(
+            v => v.mission_code.toLowerCase() === mission_code.toLowerCase()
+          )
+        }
+
+        if (filtered.length === 0) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: '⚠️ API temporarily unavailable. No open appointments found in cached data with the specified criteria.',
+              },
+            ],
+          }
+        }
+
+        const formattedResults = filtered
+          .map(visa => VisaService.formatVisaCenter(visa))
+          .join('\n\n')
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `⚠️ API temporarily unavailable. Showing cached data:
+
+🎯 Found ${filtered.length} visa centers with open appointments (cached data):
+
+${formattedResults}
+
+Note: Data may be outdated. Please try again later for live data.`,
+            },
+          ],
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Error fetching open appointments: ${error instanceof Error ? error.message : 'Unknown error'}
+
+The visa appointment API is currently unavailable. Please try again later.`,
+          },
+        ],
+        isError: true,
+      }
     }
   }
 )
 
-// Additional prompts
-const additionalPrompts = [
-  'explain-concept',
-  'debug-help',
-  'optimize-code',
-  'generate-tests',
-]
-
-additionalPrompts.forEach(promptName => {
-  server.registerPrompt(
-    promptName,
-    {
-      title: promptName
-        .split('-')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' '),
-      description: `${promptName.replace('-', ' ')} assistant prompt`,
-      argsSchema: {
-        content: z.string().describe('Content for the prompt'),
-        options: z.string().optional().describe('Additional options'),
-      },
+server.registerTool(
+  'search-visa-centers',
+  {
+    title: 'Search Visa Centers',
+    description: 'Search visa centers with detailed filtering options',
+    inputSchema: {
+      country_code: z
+        .string()
+        .optional()
+        .describe('Origin country code (3 letters)'),
+      mission_code: z
+        .string()
+        .optional()
+        .describe('Destination country code (3 letters)'),
+      visa_type: z.string().optional().describe('Visa type to search for'),
+      status: z
+        .enum(['open', 'closed', 'waitlist_open', 'waitlist_closed'])
+        .optional()
+        .describe('Filter by status'),
     },
-    ({ content }) => {
-      return {
-        messages: [
-          {
-            role: 'user' as const,
-            content: {
-              type: 'text' as const,
-              text: `Process the following content for ${promptName.replace('-', ' ')}: ${content}`,
+  },
+  async ({ country_code, mission_code, visa_type, status }) => {
+    try {
+      const data = await VisaService.getVisaListWithCache()
+      const filtered = VisaService.filterVisaData(data, {
+        country_code,
+        mission_code,
+        visa_type,
+        status,
+      })
+
+      if (filtered.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'No visa centers found matching your criteria.',
             },
+          ],
+        }
+      }
+
+      const formattedResults = filtered
+        .slice(0, 10) // Limit to first 10 results
+        .map(visa => VisaService.formatVisaCenter(visa))
+        .join('\n\n')
+
+      const moreResults =
+        filtered.length > 10
+          ? `\n\n... and ${filtered.length - 10} more results`
+          : ''
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `🔍 Found ${filtered.length} matching visa centers:\n\n${formattedResults}${moreResults}`,
+          },
+        ],
+      }
+    } catch (error) {
+      // Try to get cached data as fallback
+      const cachedData = await VisaService.getCachedVisaList()
+      if (cachedData) {
+        const filtered = VisaService.filterVisaData(cachedData, {
+          country_code,
+          mission_code,
+          visa_type,
+          status,
+        })
+
+        if (filtered.length === 0) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: '⚠️ API temporarily unavailable. No visa centers found in cached data matching your criteria.',
+              },
+            ],
+          }
+        }
+
+        const formattedResults = filtered
+          .slice(0, 10) // Limit to first 10 results
+          .map(visa => VisaService.formatVisaCenter(visa))
+          .join('\n\n')
+
+        const moreResults =
+          filtered.length > 10
+            ? `\n\n... and ${filtered.length - 10} more results`
+            : ''
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `⚠️ API temporarily unavailable. Showing cached data:
+
+🔍 Found ${filtered.length} matching visa centers (cached data):
+
+${formattedResults}${moreResults}
+
+Note: Data may be outdated. Please try again later for live data.`,
+            },
+          ],
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Error searching visa centers: ${error instanceof Error ? error.message : 'Unknown error'}
+
+The visa appointment API is currently unavailable. Please try again later.`,
+          },
+        ],
+        isError: true,
+      }
+    }
+  }
+)
+
+// Register Resources
+logger.info('📄 Registering visa resources...')
+
+// Visa data resource
+server.registerResource(
+  'visa-appointments',
+  'visa://appointments',
+  {
+    title: 'Current Visa Appointment Data',
+    description: 'Live visa appointment availability data from all centers',
+    mimeType: 'application/json',
+  },
+  async uri => {
+    try {
+      const data = await VisaService.getVisaListWithCache()
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: 'application/json',
+            text: JSON.stringify(data, null, 2),
+          },
+        ],
+      }
+    } catch (error) {
+      // Check if we have any cached data to fall back to
+      const cachedData = await VisaService.getCachedVisaList()
+      if (cachedData) {
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType: 'application/json',
+              text: JSON.stringify(
+                {
+                  ...cachedData,
+                  warning: `API currently unavailable. Showing cached data from ${cachedData.summary?.last_updated || 'unknown time'}.`,
+                  error:
+                    error instanceof Error ? error.message : 'Unknown error',
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        }
+      }
+
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: 'application/json',
+            text: JSON.stringify(
+              {
+                error: `Failed to fetch visa data: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                success: false,
+                message:
+                  'The visa appointment API is currently unavailable. Please try again later.',
+                timestamp: new Date().toISOString(),
+              },
+              null,
+              2
+            ),
           },
         ],
       }
     }
-  )
-})
-
-// Register Resources
-logger.info('📄 Registering resources...')
-
-// Static configuration resource
-server.registerResource(
-  'config',
-  'config://app',
-  {
-    title: 'Application Configuration',
-    description: 'Static application configuration data',
-    mimeType: 'application/json',
-  },
-  async uri => {
-    return {
-      contents: [
-        {
-          uri: uri.href,
-          mimeType: 'application/json',
-          text: JSON.stringify(
-            {
-              app_name: 'MCP TypeScript Server Template',
-              version: '1.0.0',
-              author: 'Muhammed Kılıç',
-              database: {
-                host: 'localhost',
-                port: 5432,
-                name: 'mcp_template',
-              },
-              server: {
-                port: 3000,
-                host: '0.0.0.0',
-              },
-              logging: {
-                level: 'info',
-                format: 'json',
-              },
-              security: {
-                cors_enabled: true,
-                rate_limiting: true,
-              },
-              features: {
-                analytics: true,
-                monitoring: true,
-                caching: true,
-              },
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    }
   }
 )
 
-// Dynamic greeting resource
+// Filtered visa data resource
 server.registerResource(
-  'greeting',
-  'greeting://{name}',
+  'visa-appointments-filtered',
+  'visa://appointments/{country_code}/{mission_code}',
   {
-    title: 'Dynamic Greeting Generator',
-    description: 'Generate personalized greetings',
-    mimeType: 'text/plain',
+    title: 'Filtered Visa Appointment Data',
+    description: 'Visa appointment data filtered by country and mission codes',
+    mimeType: 'application/json',
   },
   async uri => {
-    const urlPath = new URL(uri.href).pathname
-    const name = urlPath.split('/').pop() || 'World'
+    try {
+      const urlPath = new URL(uri.href).pathname
+      const pathParts = urlPath.split('/').filter(Boolean)
+      const country_code = pathParts[1] || undefined
+      const mission_code = pathParts[2] || undefined
 
-    return {
-      contents: [
-        {
-          uri: uri.href,
-          mimeType: 'text/plain',
-          text: `Hello, ${name}! Welcome to our MCP TypeScript server template. Today is ${new Date().toLocaleDateString()}.`,
-        },
-      ],
+      const data = await VisaService.getVisaListWithCache()
+      const filtered = VisaService.filterVisaData(data, {
+        country_code,
+        mission_code,
+      })
+
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: 'application/json',
+            text: JSON.stringify(
+              {
+                success: true,
+                filters: { country_code, mission_code },
+                total_results: filtered.length,
+                visas: filtered,
+                last_updated: data.summary?.last_updated,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      }
+    } catch (error) {
+      // Try to get cached data for filtered results
+      const cachedData = await VisaService.getCachedVisaList()
+      if (cachedData) {
+        const urlPath = new URL(uri.href).pathname
+        const pathParts = urlPath.split('/').filter(Boolean)
+        const country_code = pathParts[1] || undefined
+        const mission_code = pathParts[2] || undefined
+
+        const filtered = VisaService.filterVisaData(cachedData, {
+          country_code,
+          mission_code,
+        })
+
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType: 'application/json',
+              text: JSON.stringify(
+                {
+                  success: true,
+                  filters: { country_code, mission_code },
+                  total_results: filtered.length,
+                  visas: filtered,
+                  warning: `API currently unavailable. Showing cached data from ${cachedData.summary?.last_updated || 'unknown time'}.`,
+                  last_updated: cachedData.summary?.last_updated,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        }
+      }
+
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: 'application/json',
+            text: JSON.stringify(
+              {
+                error: `Failed to fetch filtered visa data: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                success: false,
+                message:
+                  'The visa appointment API is currently unavailable. Please try again later.',
+                timestamp: new Date().toISOString(),
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      }
     }
   }
 )
@@ -371,21 +584,22 @@ export async function startServer(transport?: 'stdio' | 'http') {
   // Set the logger transport mode
   logger.setTransport(transport || 'stdio')
 
-  logger.info('🚀 Starting MCP TypeScript Template Server...')
+  logger.info('🚀 Starting Visa Checker MCP Server...')
   logger.info(`📦 Server name: ${serverConfig.name}`)
   logger.info(`📋 Version: ${serverConfig.version}`)
-  logger.info('🎯 All MCP request types supported:')
+  logger.info('🎯 Visa appointment checking capabilities:')
   logger.info(
-    '   ✅ Core: initialize, tools/list, tools/call, resources/list, resources/read, prompts/list, prompts/get, ping'
+    '   ✅ Tools: fetch-visa-appointments, get-open-appointments, search-visa-centers'
   )
   logger.info(
-    '   ✅ Optional: discovery, resources/subscribe, resources/unsubscribe, resources/templates/list'
+    '   ✅ Resources: visa://appointments, visa://appointments/{country}/{mission}'
   )
   logger.info(
-    '   ✅ Extended: sampling/createMessage, completion/complete, elicitation/create, roots/list'
+    '   ✅ Features: Live data, smart caching, error handling with fallback'
   )
+  logger.info('🎯 MCP protocol support:')
   logger.info(
-    '   ✅ Management: logging/setLevel, session/create, session/destroy'
+    '   ✅ Core: initialize, tools/list, tools/call, resources/list, resources/read, ping'
   )
 
   if (!transport || transport === 'stdio') {

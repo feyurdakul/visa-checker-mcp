@@ -1,6 +1,6 @@
-# VisaCheckerMcp
+# Visa Checker MCP Server
 
-MCP TypeScript server: visa-checker-mcp
+A specialized MCP (Model Context Protocol) server for checking visa appointment availability in real-time
 
 ## ⚡ Quick Start
 
@@ -22,41 +22,110 @@ bun run dev:http
 
 ### 🔧 **Modern Tooling**
 - **Bun** - Lightning-fast package manager and runtime
-- **Hono** - Ultra-lightweight web framework (14kB, zero dependencies)
-- **TypeScript** - Full type safety with native Bun support
+- **TypeScript** - Full type safety with comprehensive validation
 - **ESLint + Prettier** - Code linting and formatting
+- **Vitest** - Fast unit testing framework
 
-### 📡 **Complete MCP Server Implementation**
-- **Tools**: Parameter validation with example calculator and weather API
-- **Resources**: Static config and dynamic template resources  
-- **Prompts**: Code review prompt with configurable focus areas
-- **Transports**: Both stdio (process communication) and HTTP+SSE (web-based)
-- **Standards Compliant**: Follows official MCP specification
-- **Logging**: Transport-aware logging system for proper MCP client compatibility
+### 📡 **Visa Appointment Checking**
+- **Live Data**: Real-time visa appointment availability from visasbot.com API
+- **Smart Caching**: 5-minute intelligent caching to reduce API load
+- **Error Resilience**: Automatic fallback to cached data when API is unavailable
+- **Comprehensive Filtering**: Filter by country, mission, status, and visa type
+- **Rich Formatting**: Emoji-enhanced status indicators and detailed information
 
-### 🛠️ **Built-in Capabilities**
+### 🛠️ **MCP Capabilities**
 
-- **Tools**: Calculator (`add`), Weather API (`fetch-weather`)
-- **Resources**: Static config (`config://app`), Dynamic greeting (`greeting://{name}`)
-- **Prompts**: Code review with focus options (security, performance, readability, all)
-- **Transport-aware Logging**: Proper stderr logging for stdio, console logging for HTTP
-- **Zod Validation**: Runtime type checking for all parameters
+- **Tools**: 
+  - `fetch-visa-appointments` - Get comprehensive appointment data with filtering
+  - `get-open-appointments` - Get only centers with available appointments
+  - `search-visa-centers` - Advanced search with multiple filter options
+- **Resources**: 
+  - `visa://appointments` - Complete live visa appointment data (JSON)
+  - `visa://appointments/{country_code}/{mission_code}` - Filtered data by country codes
+- **Features**:
+  - **Transport-aware Logging**: Proper stderr logging for stdio compatibility
+  - **Zod Validation**: Runtime type checking for all parameters
+  - **Error Handling**: Graceful degradation with cached data fallback
+  - **Standards Compliant**: Follows official MCP specification
 
 ## 📁 Project Structure
 
 ```
 visa-checker-mcp/
 ├── src/
-│   ├── index.ts        # Main server with stdio transport
-│   ├── http.ts         # HTTP server with SSE support
-│   └── stdio.ts        # Stdio transport utilities
-├── docs/               # Documentation and guides
-├── package.json        # Project configuration
-├── tsconfig.json       # TypeScript configuration
-└── README.md          # This file
+│   ├── index.ts            # Main MCP server with visa tools and resources
+│   ├── services/
+│   │   ├── visa.ts         # Visa API client and data processing
+│   │   └── visa.test.ts    # Unit tests for visa service
+│   ├── config/
+│   │   └── server.ts       # Server configuration
+│   └── utils/
+│       └── logger.ts       # Transport-aware logging
+├── package.json            # Project configuration
+├── tsconfig.json          # TypeScript configuration
+└── README.md              # This file
 ```
 
 ## 🎯 Usage Examples
+
+### Visa Appointment Checking
+
+The server provides powerful visa appointment checking capabilities through the visasbot.com API:
+
+#### Available Tools:
+
+1. **`fetch-visa-appointments`** - Get comprehensive visa appointment data
+   ```typescript
+   // Get all appointments
+   await tool.call('fetch-visa-appointments', {})
+   
+   // Filter by country (Turkey to Netherlands)
+   await tool.call('fetch-visa-appointments', {
+     country_code: 'tur',
+     mission_code: 'nld'
+   })
+   
+   // Filter by status
+   await tool.call('fetch-visa-appointments', {
+     status: 'open'
+   })
+   ```
+
+2. **`get-open-appointments`** - Get only centers with available appointments
+   ```typescript
+   // Get all open appointments
+   await tool.call('get-open-appointments', {})
+   
+   // Filter open appointments by country
+   await tool.call('get-open-appointments', {
+     country_code: 'tur'
+   })
+   ```
+
+3. **`search-visa-centers`** - Advanced search with multiple filters
+   ```typescript
+   await tool.call('search-visa-centers', {
+     country_code: 'tur',
+     mission_code: 'nld',
+     visa_type: 'tourism',
+     status: 'open'
+   })
+   ```
+
+#### Available Resources:
+
+- **`visa://appointments`** - Complete live visa appointment data (JSON)
+- **`visa://appointments/{country_code}/{mission_code}`** - Filtered data by country codes
+
+#### Features:
+- 🚀 **Live Data**: Fetches real-time appointment availability
+- ⚡ **Smart Caching**: 5-minute cache to reduce API calls
+- 🔍 **Advanced Filtering**: By country, mission, status, and visa type
+- 📊 **Rich Formatting**: Emoji-enhanced status indicators
+- 🛡️ **Error Resilience**: Automatic fallback to cached data when API is unavailable
+- ⚠️ **Graceful Degradation**: Clear warnings when using cached data
+- ✅ **Type Safety**: Full TypeScript validation with Zod schemas
+- 🔄 **Timeout Protection**: 10-second timeout with proper error handling
 
 ### Development
 
